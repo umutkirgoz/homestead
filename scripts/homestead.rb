@@ -15,7 +15,7 @@ class Homestead
         # Configure The Box
         config.vm.define settings["name"] ||= "homestead-7"
         config.vm.box = settings["box"] ||= "laravel/homestead"
-        config.vm.box_version = settings["version"] ||= ">= 2.0.0"
+        config.vm.box_version = settings["version"] ||= ">= 3.0.0"
         config.vm.hostname = settings["hostname"] ||= "homestead"
 
         # Configure A Private Network IP
@@ -111,11 +111,20 @@ class Homestead
 
         # Copy The SSH Private Keys To The Box
         if settings.include? 'keys'
+            if settings["keys"].to_s.length == 0
+                puts "Check your Homestead.yaml file, you have no private key(s) specified."
+                exit
+            end
             settings["keys"].each do |key|
-                config.vm.provision "shell" do |s|
-                    s.privileged = false
-                    s.inline = "echo \"$1\" > /home/vagrant/.ssh/$2 && chmod 600 /home/vagrant/.ssh/$2"
-                    s.args = [File.read(File.expand_path(key)), key.split('/').last]
+                if File.exists? File.expand_path(key)
+                    config.vm.provision "shell" do |s|
+                        s.privileged = false
+                        s.inline = "echo \"$1\" > /home/vagrant/.ssh/$2 && chmod 600 /home/vagrant/.ssh/$2"
+                        s.args = [File.read(File.expand_path(key)), key.split('/').last]
+                    end
+                else
+                    puts "Check your Homestead.yaml file, the path to your private key does not exist."
+                    exit
                 end
             end
         end
@@ -193,7 +202,7 @@ class Homestead
                         params += " )"
                     end
                     s.path = scriptDir + "/serve-#{type}.sh"
-                    s.args = [site["map"], site["to"], site["port"] ||= "80", site["ssl"] ||= "443", params ||= ""]
+                    s.args = [site["map"], site["to"], site["port"] ||= "80", site["ssl"] ||= "443", site["php"] ||= "7.1", params ||= ""]
                 end
 
                 # Configure The Cron Schedule
@@ -221,7 +230,7 @@ class Homestead
 
         config.vm.provision "shell" do |s|
             s.name = "Restarting Nginx"
-            s.inline = "sudo service nginx restart; sudo service php7.1-fpm restart"
+            s.inline = "sudo service nginx restart; sudo service php5.6-fpm restart; sudo service php7.0-fpm restart; sudo service php7.1-fpm restart"
         end
 
         # Install MariaDB If Necessary
@@ -235,6 +244,13 @@ class Homestead
         if settings.has_key?("mongodb") && settings["mongodb"]
             config.vm.provision "shell" do |s|
                 s.path = scriptDir + "/install-mongo.sh"
+            end
+        end
+
+        # Install CouchDB If Necessary
+        if settings.has_key?("couchdb") && settings["couchdb"]
+            config.vm.provision "shell" do |s|
+                s.path = scriptDir + "/install-couch.sh"
             end
         end
 
@@ -260,6 +276,14 @@ class Homestead
                         s.args = [db]
                     end
                 end
+
+                if settings.has_key?("couchdb") && settings["couchdb"]
+                    config.vm.provision "shell" do |s|
+                        s.name = "Creating Couch Database: " + db
+                        s.path = scriptDir + "/create-couch.sh"
+                        s.args = [db]
+                    end
+                end
             end
         end
 
@@ -272,6 +296,16 @@ class Homestead
         if settings.has_key?("variables")
             settings["variables"].each do |var|
                 config.vm.provision "shell" do |s|
+                    s.inline = "echo \"\nenv[$1] = '$2'\" >> /etc/php/5.6/fpm/php-fpm.conf"
+                    s.args = [var["key"], var["value"]]
+                end
+
+                config.vm.provision "shell" do |s|
+                    s.inline = "echo \"\nenv[$1] = '$2'\" >> /etc/php/7.0/fpm/php-fpm.conf"
+                    s.args = [var["key"], var["value"]]
+                end
+
+                config.vm.provision "shell" do |s|
                     s.inline = "echo \"\nenv[$1] = '$2'\" >> /etc/php/7.1/fpm/php-fpm.conf"
                     s.args = [var["key"], var["value"]]
                 end
@@ -283,7 +317,7 @@ class Homestead
             end
 
             config.vm.provision "shell" do |s|
-                s.inline = "service php7.1-fpm restart"
+                s.inline = "service php5.6-fpm restart; service php7.0-fpm restart; service php7.1-fpm restart;"
             end
         end
 
